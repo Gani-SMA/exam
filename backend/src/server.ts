@@ -1,57 +1,105 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
-import { Server } from 'socket.io';
-import dotenv from 'dotenv';
+import { Server as SocketIOServer } from 'socket.io';
+import 'express-async-errors';
 
-import { connectDB } from '@/config/database';
-import { connectRedis } from '@/config/redis';
-import { errorHandler } from '@/middleware/errorHandler';
-import { logger } from '@/utils/logger';
-import { initializeSocketIO } from '@/config/socket';
+import { connectDatabase } from './config/database';
+import { connectRedis } from './config/redis';
+import { errorHandler, notFound } from './middleware/errorHandler';
+import { setupSocketIO } from './config/socket';
+import { logger } from './utils/logger';
 
 // Import routes
-import authRoutes from '@/routes/auth';
-import userRoutes from '@/routes/users';
-import examRoutes from '@/routes/exams';
-import questionRoutes from '@/routes/questions';
-import resultRoutes from '@/routes/results';
-import leaderboardRoutes from '@/routes/leaderboard';
-import aiRoutes from '@/routes/ai';
-import adminRoutes from '@/routes/admin';
+import authRoutes from './routes/auth';
+import userRoutes from './routes/user';
+import examRoutes from './routes/exam';
+import questionRoutes from './routes/question';
+import leaderboardRoutes from './routes/leaderboard';
+import adminRoutes from './routes/admin';
+import aiRoutes from './routes/ai';
+import battleRoutes from './routes/battle';
+import battleRoutes from './routes/battle';
 
+// Load environment variables
+import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
 const server = createServer(app);
-const io = new Server(server, {
+
+// Initialize Socket.IO
+const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     methods: ['GET', 'POST'],
     credentials: true,
   },
 });
 
+// Connect to databases
+connectDatabase();
+connectRedis();
+
 // Security middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
-  credentials: true,
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
 }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),
-  message: 'Too many requests from this IP, please try again later.',
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW || '15') * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'), // limit each IP to 100 requests per windowMs
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
-app.use('/api/', limiter);
+
+app.use(limiter);
+
+// CORS configuration
+const corsOptions = {
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+};
+
+app.use(cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Compression middleware
+app.use(compression());
+
+// Request logging
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.path}`, { ip: req.ip, userAgent: req.get('User-Agent') });
+    next();
+  });
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -59,6 +107,8 @@ app.get('/health', (req, res) => {
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
+    environment: process.env.NODE_ENV,
+    version: process.env.npm_package_version || '1.0.0',
   });
 });
 
@@ -67,58 +117,46 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/exams', examRoutes);
 app.use('/api/questions', questionRoutes);
-app.use('/api/results', resultRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
-app.use('/api/ai', aiRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/battles', battleRoutes);
+app.use('/api/battles', battleRoutes);
 
-// Initialize Socket.IO
-initializeSocketIO(io);
+// Serve static files (uploads)
+app.use('/uploads', express.static('uploads'));
 
-// Error handling middleware
+// Initialize Socket.IO handlers
+setupSocketIO(io);
+
+// Make io available to routes
+app.set('io', io);
+
+// Error handling middleware (must be last)
+app.use(notFound);
 app.use(errorHandler);
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-  });
-});
 
 const PORT = process.env.PORT || 5000;
 
-async function startServer() {
-  try {
-    // Connect to databases
-    await connectDB();
-    await connectRedis();
-
-    server.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
-      logger.info(`Environment: ${process.env.NODE_ENV}`);
-    });
-  } catch (error) {
-    logger.error('Failed to start server:', error);
-    process.exit(1);
-  }
-}
+server.listen(PORT, () => {
+  console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+  console.log(`📚 API Documentation available at http://localhost:${PORT}/api-docs`);
+  console.log(`🏥 Health check available at http://localhost:${PORT}/health`);
+});
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
+  console.log('SIGTERM received. Shutting down gracefully...');
   server.close(() => {
-    logger.info('Process terminated');
+    console.log('Process terminated');
   });
 });
 
 process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
+  console.log('SIGINT received. Shutting down gracefully...');
   server.close(() => {
-    logger.info('Process terminated');
+    console.log('Process terminated');
   });
 });
 
-startServer();
-
-export { app, io };
+export default app;

@@ -1,5 +1,4 @@
 import { createClient, RedisClientType } from 'redis';
-import { logger } from '@/utils/logger';
 
 let redisClient: RedisClientType;
 
@@ -7,28 +6,30 @@ export const connectRedis = async (): Promise<void> => {
   try {
     redisClient = createClient({
       url: process.env.REDIS_URL || 'redis://localhost:6379',
+      password: process.env.REDIS_PASSWORD || undefined,
     });
 
     redisClient.on('error', (err) => {
-      logger.error('Redis Client Error:', err);
+      console.error('Redis Client Error:', err);
     });
 
     redisClient.on('connect', () => {
-      logger.info('Redis Client Connected');
+      console.log('🔴 Redis Connected');
     });
 
     redisClient.on('ready', () => {
-      logger.info('Redis Client Ready');
+      console.log('🔴 Redis Ready');
     });
 
     redisClient.on('end', () => {
-      logger.warn('Redis Client Disconnected');
+      console.log('🔴 Redis Connection Ended');
     });
 
     await redisClient.connect();
   } catch (error) {
-    logger.error('Redis connection failed:', error);
-    throw error;
+    console.error('Error connecting to Redis:', error);
+    // Don't exit process if Redis fails, just log the error
+    console.log('⚠️  Continuing without Redis cache...');
   }
 };
 
@@ -39,60 +40,55 @@ export const getRedisClient = (): RedisClientType => {
   return redisClient;
 };
 
-export const disconnectRedis = async (): Promise<void> => {
+export const setCache = async (key: string, value: string, expireInSeconds?: number): Promise<void> => {
   try {
-    if (redisClient) {
-      await redisClient.quit();
-      logger.info('Redis connection closed');
+    if (redisClient && redisClient.isReady) {
+      if (expireInSeconds) {
+        await redisClient.setEx(key, expireInSeconds, value);
+      } else {
+        await redisClient.set(key, value);
+      }
     }
   } catch (error) {
-    logger.error('Error closing Redis connection:', error);
+    console.error('Error setting cache:', error);
   }
 };
 
-// Cache utility functions
-export const cacheSet = async (key: string, value: any, expireInSeconds?: number): Promise<void> => {
+export const getCache = async (key: string): Promise<string | null> => {
   try {
-    const client = getRedisClient();
-    const serializedValue = JSON.stringify(value);
-    
-    if (expireInSeconds) {
-      await client.setEx(key, expireInSeconds, serializedValue);
-    } else {
-      await client.set(key, serializedValue);
+    if (redisClient && redisClient.isReady) {
+      return await redisClient.get(key);
     }
+    return null;
   } catch (error) {
-    logger.error('Cache set error:', error);
-  }
-};
-
-export const cacheGet = async (key: string): Promise<any> => {
-  try {
-    const client = getRedisClient();
-    const value = await client.get(key);
-    return value ? JSON.parse(value) : null;
-  } catch (error) {
-    logger.error('Cache get error:', error);
+    console.error('Error getting cache:', error);
     return null;
   }
 };
 
-export const cacheDel = async (key: string): Promise<void> => {
+export const deleteCache = async (key: string): Promise<void> => {
   try {
-    const client = getRedisClient();
-    await client.del(key);
+    if (redisClient && redisClient.isReady) {
+      await redisClient.del(key);
+    }
   } catch (error) {
-    logger.error('Cache delete error:', error);
+    console.error('Error deleting cache:', error);
   }
 };
 
-export const cacheExists = async (key: string): Promise<boolean> => {
+export const clearCache = async (pattern?: string): Promise<void> => {
   try {
-    const client = getRedisClient();
-    const exists = await client.exists(key);
-    return exists === 1;
+    if (redisClient && redisClient.isReady) {
+      if (pattern) {
+        const keys = await redisClient.keys(pattern);
+        if (keys.length > 0) {
+          await redisClient.del(keys);
+        }
+      } else {
+        await redisClient.flushAll();
+      }
+    }
   } catch (error) {
-    logger.error('Cache exists error:', error);
-    return false;
+    console.error('Error clearing cache:', error);
   }
 };

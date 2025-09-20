@@ -2,7 +2,7 @@
 
 ## Introduction
 
-The GATE/GRE/TOEFL Examination Platform is a comprehensive online examination system designed to provide secure, interactive practice tests for three major standardized exams. The platform combines AI-powered adaptive testing, real-time multiplayer quiz battles, advanced proctoring features, and gamification elements to create an engaging and effective learning environment for students preparing for GATE, GRE, and TOEFL examinations.
+The Online Examination & Gamified Quiz Platform is a comprehensive web-based system that allows educators to create secure exams with randomized questions and timed sessions, while offering an interactive quiz mode for practice and competition. The platform serves students, educators, online learning platforms, and universities by providing automated grading, instant feedback, live leaderboards, and advanced features like AI-generated quizzes, multiplayer battles, and plagiarism detection. The system supports multiple exam types including GATE, GRE, and TOEFL with specialized features for each format.
 
 ## Requirements
 
