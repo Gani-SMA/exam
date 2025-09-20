@@ -1,0 +1,31 @@
+{
+  "name": "gate-gre-toefl-examination-platform",
+  "version": "1.0.0",
+  "description": "Comprehensive online examination platform for GATE, GRE, and TOEFL with AI-powered features",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "cd backend && npm run dev",
+    "client:dev": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start",
+    "test": "npm run test:backend && npm run test:frontend",
+    "test:backend": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+  },
+  "keywords": [
+    "examination",
+    "GATE",
+    "GRE",
+    "TOEFL",
+    "AI",
+    "gamification",
+    "proctoring"
+  ],
+  "author": "Examination Platform Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
